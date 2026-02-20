@@ -3,19 +3,18 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Luxury Birthday Tree</title>
+    <title>Birthday Tree Pro</title>
     <style>
-        body { margin: 0; overflow: hidden; background-color: #000000; font-family: 'Times New Roman', serif; }
+        body { margin: 0; overflow: hidden; background-color: #000; font-family: 'Times New Roman', serif; }
         #canvas-container { width: 100vw; height: 100vh; position: absolute; top: 0; left: 0; z-index: 1; }
         #ui-layer { position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 10; pointer-events: none; display: flex; flex-direction: column; align-items: center; padding-top: 40px; box-sizing: border-box; }
-        .ui-hidden { opacity: 0; pointer-events: none !important; }
-        #loader { position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: #000; z-index: 100; display: flex; flex-direction: column; align-items: center; justify-content: center; transition: opacity 0.8s ease-out; }
+        #loader { position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: #000; z-index: 100; display: flex; flex-direction: column; align-items: center; justify-content: center; transition: opacity 0.8s; }
         .loader-text { color: #d4af37; font-size: 14px; letter-spacing: 4px; margin-top: 20px; text-transform: uppercase; }
         .spinner { width: 40px; height: 40px; border: 1px solid rgba(212, 175, 55, 0.2); border-top: 1px solid #d4af37; border-radius: 50%; animation: spin 1s linear infinite; }
         @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
-        h1 { color: #fceea7; font-size: 56px; margin: 0; font-weight: 400; letter-spacing: 6px; text-shadow: 0 0 50px rgba(252, 238, 167, 0.6); background: linear-gradient(to bottom, #fff, #eebb66); -webkit-background-clip: text; -webkit-text-fill-color: transparent; font-family: 'Cinzel', serif; opacity: 0.9; }
-        .upload-wrapper { margin-top: 20px; pointer-events: auto; text-align: center; }
-        .upload-btn { background: rgba(20, 20, 20, 0.6); border: 1px solid rgba(212, 175, 55, 0.4); color: #d4af37; padding: 10px 25px; cursor: pointer; text-transform: uppercase; letter-spacing: 3px; font-size: 10px; backdrop-filter: blur(5px); }
+        h1 { color: #fceea7; font-size: 50px; margin: 0; letter-spacing: 6px; text-shadow: 0 0 30px rgba(252, 238, 167, 0.5); font-family: 'Cinzel', serif; }
+        .upload-wrapper { margin-top: 20px; pointer-events: auto; }
+        .upload-btn { background: rgba(30, 30, 30, 0.8); border: 1px solid #d4af37; color: #d4af37; padding: 10px 20px; cursor: pointer; font-size: 12px; letter-spacing: 2px; }
         #file-input { display: none; }
     </style>
     <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;700&display=swap" rel="stylesheet">
@@ -30,15 +29,12 @@
     </script>
 </head>
 <body>
-    <div id="loader">
-        <div class="spinner"></div>
-        <div class="loader-text">Preparing Birthday Surprises</div>
-    </div>
+    <div id="loader"><div class="spinner"></div><div class="loader-text">Loading Memories...</div></div>
     <div id="canvas-container"></div>
     <div id="ui-layer">
         <h1>Happy Birthday</h1>
         <div class="upload-wrapper">
-            <label class="upload-btn">Add Memories<input type="file" id="file-input" multiple accept="image/*"></label>
+            <label class="upload-btn">Add Photo<input type="file" id="file-input" multiple accept="image/*"></label>
         </div>
     </div>
 
@@ -48,186 +44,161 @@
         import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
         import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
         import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
-        import { FilesetResolver, HandLandmarker } from '@mediapipe/tasks-vision';
 
-        // --- 核心配置 ---
+        // 1. 配置信息
         const CONFIG = {
-            colors: { bg: 0x000000, gold: 0xffd966, pink: 0xffb6c1 },
-            particles: { count: 1400, dustCount: 2000, treeHeight: 24, treeRadius: 8 }
+            colors: { gold: 0xffd966, pink: 0xffb6c1 },
+            tree: { count: 1200, height: 24, radius: 8 }
         };
 
-        const STATE = { mode: 'TREE', focusTarget: null, rotation: { x: 0, y: 0 }, hand: { detected: false } };
         let scene, camera, renderer, composer, mainGroup, clock = new THREE.Clock();
-        let particleSystem = [], photoMeshGroup = new THREE.Group(), handLandmarker, video;
+        let particleSystem = [], photoGroup = new THREE.Group();
 
-        // --- 初始化主控 ---
-        async function init() {
-            try {
-                initThree();
-                setupLights();
-                createParticles();
-                createDust();
-                createDefaultPhotos();
-                
-                // 自动加载“增添.docx”中的预设图片逻辑
-                loadPresetImages();
+        // 2. 初始化流程 (这是主入口)
+        async function startApp() {
+            initScene();
+            createTree();
+            createDefaultCard();
+            
+            // --- 这里整合“增添.docx”逻辑 ---
+            loadMyImages(); 
 
-                setupPostProcessing();
-                setupEvents();
-                
-                // MediaPipe 加载 (带防卡死保护)
-                await Promise.race([
-                    initMediaPipe(),
-                    new Promise(res => setTimeout(res, 5000))
-                ]);
-            } catch (e) {
-                console.warn("初始化非致命错误:", e);
-            } finally {
-                const loader = document.getElementById('loader');
-                if(loader) { loader.style.opacity = 0; setTimeout(() => loader.remove(), 800); }
-                animate();
-            }
+            setupPostProcessing();
+            setupWindowEvents();
+            
+            // 关闭加载遮罩
+            const loader = document.getElementById('loader');
+            if(loader) { loader.style.opacity = 0; setTimeout(() => loader.remove(), 800); }
+            
+            renderLoop();
         }
 
-        function initThree() {
+        // 3. 核心功能函数
+        function initScene() {
             scene = new THREE.Scene();
-            camera = new THREE.PerspectiveCamera(42, window.innerWidth / window.innerHeight, 0.1, 1000);
-            camera.position.set(0, 2, 50);
+            camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 1000);
+            camera.position.set(0, 5, 50);
+            
             renderer = new THREE.WebGLRenderer({ antialias: true });
             renderer.setSize(window.innerWidth, window.innerHeight);
             renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
             renderer.toneMapping = THREE.ReinhardToneMapping;
             document.getElementById('canvas-container').appendChild(renderer.domElement);
+            
             mainGroup = new THREE.Group();
             scene.add(mainGroup);
+            mainGroup.add(photoGroup);
+
             const pmrem = new THREE.PMREMGenerator(renderer);
             scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
+            scene.add(new THREE.AmbientLight(0xffffff, 0.6));
         }
 
-        function setupLights() {
-            scene.add(new THREE.AmbientLight(0xffffff, 0.8));
-            const spot = new THREE.SpotLight(0xffcc66, 1200);
-            spot.position.set(30, 40, 40);
-            scene.add(spot);
-        }
-
-        // --- 核心逻辑：加载预设图片 (修正后的逻辑) ---
-        function loadPresetImages() {
-            const presetPhotos = [
-                'images/1.jpg', 'images/2.jpg', 'images/3.jpg', 'images/4.jpg', 'images/5.jpg'
+        // --- 修正后的图片加载函数 ---
+        function loadMyImages() {
+            const pathList = [
+                'images/1.jpg',
+                'images/2.jpg',
+                'images/3.jpg',
+                'images/4.jpg',
+                'images/5.jpg'
             ];
             const loader = new THREE.TextureLoader();
-            presetPhotos.forEach(url => {
-                loader.load(url, (t) => {
-                    t.colorSpace = THREE.SRGBColorSpace;
-                    addPhotoToScene(t);
-                }, undefined, (err) => console.log("等待预设图片上传:", url));
+            pathList.forEach(url => {
+                loader.load(
+                    url, 
+                    (tex) => { tex.colorSpace = THREE.SRGBColorSpace; addPhoto(tex); },
+                    undefined,
+                    () => console.log('Wait for image:', url)
+                );
             });
         }
 
-        function addPhotoToScene(texture) {
-            const group = new THREE.Group();
+        function addPhoto(texture) {
+            const g = new THREE.Group();
             const frame = new THREE.Mesh(
                 new THREE.BoxGeometry(1.4, 1.4, 0.05),
-                new THREE.MeshStandardMaterial({ color: CONFIG.colors.gold, metalness: 1.0 })
+                new THREE.MeshStandardMaterial({ color: CONFIG.colors.gold, metalness: 0.8 })
             );
             const photo = new THREE.Mesh(
                 new THREE.PlaneGeometry(1.2, 1.2),
                 new THREE.MeshBasicMaterial({ map: texture })
             );
-            photo.position.z = 0.04;
-            group.add(frame, photo);
-            group.scale.setScalar(0.8);
-            photoMeshGroup.add(group);
-            particleSystem.push(new Particle(group, 'PHOTO'));
+            photo.position.z = 0.03;
+            g.add(frame, photo);
+            photoGroup.add(g);
+            particleSystem.push(new PhotoObject(g));
         }
 
-        class Particle {
-            constructor(mesh, type, isDust = false) {
-                this.mesh = mesh; this.type = type; this.isDust = isDust;
-                this.posTree = new THREE.Vector3(); this.posScatter = new THREE.Vector3();
-                this.baseScale = mesh.scale.x;
-                const h = CONFIG.particles.treeHeight, t = Math.pow(Math.random(), 0.8);
-                const y = (t * h) - h/2, r = Math.max(0.5, CONFIG.particles.treeRadius*(1-t)) * (0.8+Math.random()*0.4);
-                const a = t*50*Math.PI + Math.random()*Math.PI;
-                this.posTree.set(Math.cos(a)*r, y, Math.sin(a)*r);
-                this.posScatter.set((Math.random()-0.5)*35, (Math.random()-0.5)*35, (Math.random()-0.5)*35);
+        // 粒子/照片动画类
+        class PhotoObject {
+            constructor(mesh) {
+                this.mesh = mesh;
+                this.pos = new THREE.Vector3();
+                const t = Math.pow(Math.random(), 0.8);
+                const a = t * 40 * Math.PI + Math.random() * Math.PI;
+                const r = Math.max(0.5, CONFIG.tree.radius * (1 - t)) * (0.8 + Math.random() * 0.4);
+                this.pos.set(Math.cos(a) * r, (t * CONFIG.tree.height) - 12, Math.sin(a) * r);
             }
-            update(dt, mode) {
-                let target = (mode==='SCATTER') ? this.posScatter : this.posTree;
-                this.mesh.position.lerp(target, 2*dt);
-                this.mesh.rotation.y += 0.5*dt;
-                let s = this.baseScale;
-                if(this.isDust && mode==='TREE') s=0;
-                this.mesh.scale.lerp(new THREE.Vector3(s,s,s), 4*dt);
+            update(dt) {
+                this.mesh.position.lerp(this.pos, 1.5 * dt);
+                this.mesh.rotation.y += 0.4 * dt;
             }
         }
 
-        function createParticles() {
-            const goldMat = new THREE.MeshStandardMaterial({color: CONFIG.colors.gold, metalness: 1});
-            for(let i=0; i<CONFIG.particles.count; i++) {
-                const m = new THREE.Mesh(new THREE.SphereGeometry(0.3), goldMat);
-                m.scale.setScalar(0.4+Math.random()*0.4);
-                mainGroup.add(m);
-                particleSystem.push(new Particle(m, 'PROP'));
-            }
-            mainGroup.add(photoMeshGroup);
-        }
-
-        function createDust() {
-            const m = new THREE.MeshBasicMaterial({color: 0xffeebb, transparent: true, opacity: 0.6});
-            for(let i=0; i<CONFIG.particles.dustCount; i++) {
-                const p = new THREE.Mesh(new THREE.TetrahedronGeometry(0.08), m);
-                mainGroup.add(p);
-                particleSystem.push(new Particle(p, 'DUST', true));
+        function createTree() {
+            const mat = new THREE.MeshStandardMaterial({color: CONFIG.colors.gold, metalness: 1});
+            const geo = new THREE.SphereGeometry(0.2, 8, 8);
+            for(let i=0; i<CONFIG.tree.count; i++) {
+                const m = new THREE.Mesh(geo, mat);
+                photoGroup.add(m);
+                particleSystem.push(new PhotoObject(m));
             }
         }
 
-        function createDefaultPhotos() {
+        function createDefaultCard() {
             const can = document.createElement('canvas'); can.width=512; can.height=512;
-            const ctx = can.getContext('2d'); ctx.fillStyle='#050505'; ctx.fillRect(0,0,512,512);
-            ctx.font='bold 60px serif'; ctx.fillStyle='#eebb66'; ctx.textAlign='center';
-            ctx.fillText("HAPPY DAY", 256, 270);
-            addPhotoToScene(new THREE.CanvasTexture(can));
+            const ctx = can.getContext('2d'); ctx.fillStyle='#111'; ctx.fillRect(0,0,512,512);
+            ctx.fillStyle='#d4af37'; ctx.font='bold 50px serif'; ctx.textAlign='center';
+            ctx.fillText("BIRTHDAY", 256, 270);
+            addPhoto(new THREE.CanvasTexture(can));
         }
 
         function setupPostProcessing() {
             composer = new EffectComposer(renderer);
             composer.addPass(new RenderPass(scene, camera));
-            composer.addPass(new UnrealBloomPass(new THREE.Vector2(window.innerWidth, window.innerHeight), 0.5, 0.4, 0.85));
+            composer.addPass(new UnrealBloomPass(new THREE.Vector2(window.innerWidth, window.innerHeight), 0.6, 0.4, 0.85));
         }
 
-        async function initMediaPipe() {
-            const vision = await FilesetResolver.forVisionTasks("https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.3/wasm");
-            handLandmarker = await HandLandmarker.createFromOptions(vision, {
-                baseOptions: { modelAssetPath: `https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task`, delegate: "GPU" },
-                runningMode: "VIDEO", numHands: 1
-            });
-        }
-
-        function setupEvents() {
+        function setupWindowEvents() {
             window.addEventListener('resize', () => {
-                camera.aspect = window.innerWidth/window.innerHeight; camera.updateProjectionMatrix();
+                camera.aspect = window.innerWidth / window.innerHeight;
+                camera.updateProjectionMatrix();
                 renderer.setSize(window.innerWidth, window.innerHeight);
             });
             document.getElementById('file-input').addEventListener('change', (e) => {
-                Array.from(e.target.files).forEach(f => {
-                    const r = new FileReader(); r.onload = (ev) => {
-                        new THREE.TextureLoader().load(ev.target.result, (t) => { t.colorSpace = THREE.SRGBColorSpace; addPhotoToScene(t); });
-                    }; r.readAsDataURL(f);
+                Array.from(e.target.files).forEach(file => {
+                    const reader = new FileReader();
+                    reader.onload = (ev) => {
+                        new THREE.TextureLoader().load(ev.target.result, (t) => {
+                            t.colorSpace = THREE.SRGBColorSpace; addPhoto(t);
+                        });
+                    };
+                    reader.readAsDataURL(file);
                 });
             });
         }
 
-        function animate() {
-            requestAnimationFrame(animate);
+        function renderLoop() {
+            requestAnimationFrame(renderLoop);
             const dt = clock.getDelta();
-            mainGroup.rotation.y += 0.2 * dt;
-            particleSystem.forEach(p => p.update(dt, STATE.mode));
+            mainGroup.rotation.y += 0.15 * dt;
+            particleSystem.forEach(p => p.update(dt));
             composer.render();
         }
 
-        init();
+        // 启动应用
+        startApp();
     </script>
 </body>
 </html>
